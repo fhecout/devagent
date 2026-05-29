@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-surface-900 text-slate-100 antialiased min-h-screen;
+  }
+
+  ::selection {
+    @apply bg-accent/40 text-white;
+  }
+}
+
+@layer components {
+  .prose-report {
+    @apply text-slate-300 text-sm leading-relaxed whitespace-pre-wrap;
+  }
+
+  .prose-report ul {
+    @apply list-disc pl-5 space-y-1 my-2;
+  }
+}

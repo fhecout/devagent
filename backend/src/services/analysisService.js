@@ -8,6 +8,7 @@ const { sanitizeSummary, mergeSections, extractScore } = require('../utils/repor
 const { computeTechnicalScore } = require('../utils/scoreCalculator');
 const { buildScannerReport } = require('../utils/reportBuilder');
 const { correctSummary } = require('../utils/projectBriefBuilder');
+const { withAnalysisSlot } = require('../utils/analysisSemaphore');
 
 async function analyzeRepository(repoUrl) {
   const parsed = parseGitHubUrl(repoUrl);
@@ -17,9 +18,10 @@ async function analyzeRepository(repoUrl) {
     throw err;
   }
 
-  let cloneResult = null;
+  return withAnalysisSlot(async () => {
+    let cloneResult = null;
 
-  try {
+    try {
     cloneResult = await githubService.cloneRepository(repoUrl);
     const scanResult = await repoScannerService.scanRepository(cloneResult.localPath, {
       repoName: parsed.repoName,
@@ -127,11 +129,12 @@ async function analyzeRepository(repoUrl) {
     formatted.projectProfile = scanResult.scanMeta.projectProfile;
     formatted.projectTypes = scanResult.scanMeta.projectTypes;
     return formatted;
-  } finally {
-    if (cloneResult?.cleanup) {
-      await cloneResult.cleanup();
+    } finally {
+      if (cloneResult?.cleanup) {
+        await cloneResult.cleanup();
+      }
     }
-  }
+  });
 }
 
 async function getHistory(limit = 20) {

@@ -4,6 +4,7 @@ const simpleGit = require('simple-git');
 const { parseGitHubUrl } = require('../utils/repoParser');
 
 const TEMP_BASE = process.env.TEMP_DIR || path.join(__dirname, '../../temp_repos');
+const CLONE_TIMEOUT_MS = parseInt(process.env.CLONE_TIMEOUT_MS || '120000', 10);
 
 async function ensureTempDir() {
   await fs.mkdir(TEMP_BASE, { recursive: true });
@@ -15,6 +16,12 @@ async function removeDir(dirPath) {
   } catch (err) {
     console.warn('[GitHub] Falha ao remover temp:', dirPath, err.message);
   }
+}
+
+function cloneTimeoutError() {
+  const err = new Error('Tempo esgotado ao clonar o repositório. Tente novamente.');
+  err.statusCode = 504;
+  return err;
 }
 
 async function cloneRepository(repoUrl) {
@@ -33,9 +40,18 @@ async function cloneRepository(repoUrl) {
   const git = simpleGit();
 
   try {
-    await git.clone(parsed.cloneUrl, targetPath, ['--depth', '1', '--single-branch']);
+    await Promise.race([
+      git.clone(parsed.cloneUrl, targetPath, ['--depth', '1', '--single-branch']),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(cloneTimeoutError()), CLONE_TIMEOUT_MS);
+      }),
+    ]);
   } catch (err) {
     await removeDir(targetPath);
+
+    if (err.statusCode === 504) {
+      throw err;
+    }
 
     const message = String(err.message || err);
     if (

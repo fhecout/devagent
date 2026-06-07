@@ -101,7 +101,9 @@ async function callOllamaChat(userContent, strict = false) {
       modelErr.statusCode = 503;
       throw modelErr;
     }
-    throw new Error('Erro na API do Ollama: ' + (body || res.statusText));
+    const apiErr = new Error('Erro na comunicação com o serviço de IA.');
+    apiErr.statusCode = 502;
+    throw apiErr;
   }
 
   const data = await res.json();
@@ -123,10 +125,10 @@ async function generateReport(repoContext) {
   try {
     raw = await callOllamaChat(repoContext, false);
   } catch (err) {
-    const networkErr = new Error(
-      'Falha ao conectar ao Ollama em ' + OLLAMA_URL + ': ' + err.message
-    );
+    console.error('[Ollama] Falha na requisição:', err.message);
+    const networkErr = new Error('Falha ao comunicar com o serviço de IA local.');
     networkErr.statusCode = 503;
+    networkErr.code = 'OLLAMA_REQUEST_FAILED';
     throw networkErr;
   }
 

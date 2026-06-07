@@ -1,6 +1,7 @@
 const fs = require('fs/promises');
 const path = require('path');
 const { shouldIgnoreDir } = require('./fileFilters');
+const { resolvePathWithinRoot, shouldSkipEntry } = require('./pathSafety');
 
 /**
  * Inventário completo do repositório (sem filtro de extensão).
@@ -17,7 +18,11 @@ async function inventoryRepository(rootPath, relative = '', paths = []) {
   }
 
   for (const entry of entries) {
+    if (shouldSkipEntry(entry)) continue;
+
     const rel = relative ? `${relative}/${entry.name}` : entry.name;
+    const fullPath = resolvePathWithinRoot(rootPath, rel);
+    if (!fullPath) continue;
 
     if (entry.isDirectory()) {
       if (shouldIgnoreDir(entry.name)) continue;
@@ -40,7 +45,9 @@ function pathMatch(paths, pattern) {
 }
 
 async function readRootFile(rootPath, filename, maxChars = 2000) {
-  const full = path.join(rootPath, filename);
+  const full = resolvePathWithinRoot(rootPath, filename);
+  if (!full) return null;
+
   try {
     const content = await fs.readFile(full, 'utf8');
     return content.length > maxChars ? `${content.slice(0, maxChars)}\n...[truncado]` : content;

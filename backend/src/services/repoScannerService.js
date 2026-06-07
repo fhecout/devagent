@@ -6,6 +6,11 @@ const {
   truncateContent,
 } = require('../utils/fileFilters');
 const {
+  resolvePathWithinRoot,
+  assertPathWithinRoot,
+  shouldSkipEntry,
+} = require('../utils/pathSafety');
+const {
   inventoryRepository,
   buildVerifiedFacts,
   formatVerifiedFactsForPrompt,
@@ -73,14 +78,16 @@ async function walkDirectory(rootPath, relative = '', collected = [], brief = nu
 
   for (const entry of entries) {
     if (collected.length >= MAX_FILES * 3) break;
+    if (shouldSkipEntry(entry)) continue;
 
     const rel = relative ? `${relative}/${entry.name}` : entry.name;
+    const fullPath = resolvePathWithinRoot(rootPath, rel);
+    if (!fullPath) continue;
 
     if (entry.isDirectory()) {
       if (shouldIgnoreDir(entry.name)) continue;
-      await walkDirectory(rootPath, rel, collected);
+      await walkDirectory(rootPath, rel, collected, brief);
     } else if (entry.isFile()) {
-      const fullPath = path.join(rootPath, rel);
       let stat;
       try {
         stat = await fs.stat(fullPath);
@@ -104,9 +111,12 @@ async function walkDirectory(rootPath, relative = '', collected = [], brief = nu
   return collected;
 }
 
-async function readFileSafe(filePath, maxChars = 3500) {
+async function readFileSafe(rootPath, filePath, maxChars = 3500) {
+  const safePath = assertPathWithinRoot(rootPath, filePath);
+  if (!safePath) return null;
+
   try {
-    const content = await fs.readFile(filePath, 'utf8');
+    const content = await fs.readFile(safePath, 'utf8');
     return truncateContent(content, maxChars);
   } catch {
     return null;
@@ -119,9 +129,12 @@ async function buildTreeSummary(rootPath, maxDepth = 3) {
   async function walk(dir, prefix = '', depth = 0) {
     if (depth > maxDepth || lines.length > 80) return;
 
+    const safeDir = assertPathWithinRoot(rootPath, dir);
+    if (!safeDir) return;
+
     let entries;
     try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
+      entries = await fs.readdir(safeDir, { withFileTypes: true });
     } catch {
       return;
     }
@@ -130,13 +143,18 @@ async function buildTreeSummary(rootPath, maxDepth = 3) {
 
     for (const entry of entries.slice(0, 40)) {
       if (lines.length > 80) break;
+      if (shouldSkipEntry(entry)) continue;
+
+      const childPath = assertPathWithinRoot(rootPath, path.join(safeDir, entry.name));
+      if (!childPath) continue;
+
       if (entry.isDirectory() && shouldIgnoreDir(entry.name)) continue;
 
       const branch = `${prefix}${entry.name}${entry.isDirectory() ? '/' : ''}`;
       lines.push(branch);
 
       if (entry.isDirectory() && depth < maxDepth) {
-        await walk(path.join(dir, entry.name), `${prefix}  `, depth + 1);
+        await walk(childPath, `${prefix}  `, depth + 1);
       }
     }
   }
@@ -194,7 +212,7 @@ async function scanRepository(localPath, githubMeta = {}) {
   let readmeEarly = null;
   for (const p of inventoryPaths) {
     if (/^readme\.md$/i.test(path.basename(p))) {
-      readmeEarly = await readFileSafe(path.join(localPath, p), 12000);
+      readmeEarly = await readFileSafe(localPath, path.join(localPath, p), 12000);
       break;
     }
   }
@@ -202,12 +220,13 @@ async function scanRepository(localPath, githubMeta = {}) {
   const packagePath = inventoryPaths.find((p) => /^package\.json$/i.test(path.basename(p)));
   let packageJsonEarly = null;
   if (packagePath) {
-    try {
-      packageJsonEarly = JSON.parse(
-        await fs.readFile(path.join(localPath, packagePath), 'utf8')
-      );
-    } catch {
-      packageJsonEarly = null;
+    const safePackagePath = resolvePathWithinRoot(localPath, packagePath);
+    if (safePackagePath) {
+      try {
+        packageJsonEarly = JSON.parse(await fs.readFile(safePackagePath, 'utf8'));
+      } catch {
+        packageJsonEarly = null;
+      }
     }
   }
 
@@ -243,7 +262,7 @@ async function scanRepository(localPath, githubMeta = {}) {
   for (const file of selected) {
     if (totalChars >= MAX_TOTAL_CHARS) break;
 
-    const content = await readFileSafe(file.fullPath);
+    const content = await readFileSafe(localPath, file.fullPath);
     if (!content) continue;
 
     const base = path.basename(file.relativePath).toLowerCase();
